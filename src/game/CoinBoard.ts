@@ -33,6 +33,7 @@ export class CoinBoard {
     private vfx: Vfx,
     private sound: SoundManager,
     private onChange: () => void,
+    private onInteract: () => void = () => {},
   ) {
     this.cols = Array.from({ length: tray.slotCount }, () => [] as Coin[])
     if (!isEditEnabled()) this.createZones()
@@ -158,9 +159,16 @@ export class CoinBoard {
   // ---- selection / movement ----------------------------------------------
   handleClick(i: number): void {
     if (this.busy || this.locked) return
-    if (this.selected === -1) this.select(i)
-    else if (this.selected === i) this.deselect()
-    else this.moveSelectedTo(i)
+    if (this.selected === -1) {
+      if (this.cols[i].length === 0) return // tapping an empty column does nothing
+      this.select(i)
+      this.onInteract() // picking up a coin = a coin interaction
+    } else if (this.selected === i) {
+      this.deselect() // putting it back down — not counted
+    } else {
+      this.moveSelectedTo(i)
+      this.onInteract() // moving onto another column = a coin interaction
+    }
   }
 
   private select(i: number): void {

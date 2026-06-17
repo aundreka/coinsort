@@ -46,7 +46,7 @@ export class GameScene extends Phaser.Scene {
   private busy = false
   private bubbleTimer?: Phaser.Time.TimerEvent
   private solvedTracked = false
-  private mergeCount = 0
+  private coinInteractions = 0
   private lastInteract = 0
 
   constructor() {
@@ -60,8 +60,14 @@ export class GameScene extends Phaser.Scene {
     this.logo = new Placeable(this, 'logo', 'logo')
     this.tray = new CoinTray(this)
     this.pool = new CoinPool(this)
-    this.board = new CoinBoard(this, this.tray, this.pool, this.vfx, this.audio, () =>
-      this.onBoardChange(),
+    this.board = new CoinBoard(
+      this,
+      this.tray,
+      this.pool,
+      this.vfx,
+      this.audio,
+      () => this.onBoardChange(),
+      () => this.onCoinInteract(),
     )
     this.queue = new CustomerQueue(this)
     this.patience = new PatienceBar(this, () => this.onPatienceEmpty())
@@ -166,10 +172,6 @@ export class GameScene extends Phaser.Scene {
       })
       return
     }
-    this.mergeCount++
-    if (ITERATION.mode === 'clicks' && this.mergeCount >= (ITERATION.limit ?? 2)) {
-      this.time.delayedCall(500, () => this.endGame())
-    }
   }
 
   private handleDeal(): void {
@@ -177,6 +179,16 @@ export class GameScene extends Phaser.Scene {
     this.markInteract()
     const n = this.board.dealLessThan(this.queue.requestValue)
     if (n > 0) this.audio.playCoin()
+  }
+
+  /** A coin interaction = tapping a coin column (pick up / move). The "2 clicks"
+   *  iteration ends after two such interactions (NOT merges). */
+  private onCoinInteract(): void {
+    if (this.ended) return
+    this.coinInteractions++
+    if (ITERATION.mode === 'clicks' && this.coinInteractions >= (ITERATION.limit ?? 2)) {
+      this.time.delayedCall(600, () => this.endGame())
+    }
   }
 
   /** Fired by the board after any move/merge/deal settles. */
