@@ -1,0 +1,210 @@
+[
+  {
+    "key": "bg",
+    "x": 540,
+    "y": 453,
+    "scale": 1.7,
+    "zIndex": 0,
+    "mode": "extend"
+  },
+  {
+    "key": "table",
+    "x": 540,
+    "y": 1430,
+    "scale": 1.95,
+    "zIndex": 4,
+    "mode": "extend"
+  },
+  {
+    "key": "customer",
+    "x": 600,
+    "y": 700,
+    "scale": 0.52,
+    "zIndex": 3,
+    "mode": "fit"
+  },
+  {
+    "key": "bubble",
+    "x": 259,
+    "y": 338,
+    "scale": 1,
+    "zIndex": 5,
+    "mode": "fit"
+  },
+  {
+    "key": "tray",
+    "x": 559,
+    "y": 1252,
+    "scale": 1,
+    "zIndex": 6,
+    "mode": "fit"
+  },
+  {
+    "key": "dealBtn",
+    "x": 360,
+    "y": 1700,
+    "scale": 1,
+    "zIndex": 8,
+    "mode": "fit"
+  },
+  {
+    "key": "mergeBtn",
+    "x": 722,
+    "y": 1700,
+    "scale": 1,
+    "zIndex": 8,
+    "mode": "fit"
+  },
+  {
+    "key": "heart0",
+    "x": 95,
+    "y": 110,
+    "scale": 1,
+    "zIndex": 12,
+    "mode": "fit"
+  },
+  {
+    "key": "heart1",
+    "x": 190,
+    "y": 110,
+    "scale": 1,
+    "zIndex": 12,
+    "mode": "fit"
+  },
+  {
+    "key": "heart2",
+    "x": 285,
+    "y": 110,
+    "scale": 1,
+    "zIndex": 12,
+    "mode": "fit"
+  },
+  {
+    "key": "patience",
+    "x": 208,
+    "y": 335,
+    "scale": 1,
+    "zIndex": 12,
+    "mode": "fit"
+  },
+  {
+    "key": "logo",
+    "x": 935,
+    "y": 115,
+    "scale": 1,
+    "zIndex": 12,
+    "mode": "fit"
+  },
+  {
+    "key": "hint",
+    "x": 540,
+    "y": 1560,
+    "scale": 1,
+    "zIndex": 14,
+    "mode": "fit"
+  },
+  {
+    "key": "sunrays",
+    "x": 540,
+    "y": 820,
+    "scale": 1,
+    "zIndex": 0,
+    "mode": "fit"
+  },
+  {
+    "key": "ecLogo",
+    "x": 540,
+    "y": 820,
+    "scale": 0.95,
+    "zIndex": 1,
+    "mode": "fit"
+  },
+  {
+    "key": "ecCta",
+    "x": 540,
+    "y": 1360,
+    "scale": 1,
+    "zIndex": 1,
+    "mode": "fit"
+  },
+  {
+    "key": "slot0",
+    "x": 288,
+    "y": 1144,
+    "scale": 1,
+    "zIndex": 0,
+    "mode": "fit"
+  },
+  {
+    "key": "slot1",
+    "x": 423,
+    "y": 1144,
+    "scale": 1,
+    "zIndex": 0,
+    "mode": "fit"
+  },
+  {
+    "key": "slot2",
+    "x": 559,
+    "y": 1148,
+    "scale": 1,
+    "zIndex": 0,
+    "mode": "fit"
+  },
+  {
+    "key": "slot3",
+    "x": 700,
+    "y": 1144,
+    "scale": 1,
+    "zIndex": 0,
+    "mode": "fit"
+  },
+  {
+    "key": "slot4",
+    "x": 833,
+    "y": 1144,
+    "scale": 1,
+    "zIndex": 0,
+    "mode": "fit"
+  },
+  {
+    "key": "slot5",
+    "x": 247,
+    "y": 1403,
+    "scale": 1,
+    "zIndex": 0,
+    "mode": "fit"
+  },
+  {
+    "key": "slot6",
+    "x": 401,
+    "y": 1401,
+    "scale": 1,
+    "zIndex": 0,
+    "mode": "fit"
+  },
+  {
+    "key": "slot7",
+    "x": 559,
+    "y": 1404,
+    "scale": 1,
+    "zIndex": 0,
+    "mode": "fit"
+  },
+  {
+    "key": "slot8",
+    "x": 715,
+    "y": 1405,
+    "scale": 1,
+    "zIndex": 0,
+    "mode": "fit"
+  },
+  {
+    "key": "slot9",
+    "x": 864,
+    "y": 1401,
+    "scale": 1,
+    "zIndex": 0,
+    "mode": "fit"
+  }
+]

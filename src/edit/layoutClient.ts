@@ -1,0 +1,20 @@
+import { allEntries } from '../layout'
+
+// Persists the live layout to src/layout.json via the Vite dev middleware
+// (POST /api/layout). Manual: only called when the user presses Save in
+// EditMode — no live auto-save. No-op outside dev.
+export async function saveLayout(): Promise<boolean> {
+  if (!import.meta.env.DEV) return false
+  try {
+    const res = await fetch('/api/layout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(allEntries(), null, 2),
+    })
+    if (!res.ok) console.warn('[layout save]', res.status, await res.text())
+    return res.ok
+  } catch (e) {
+    console.warn('[layout save failed]', e)
+    return false
+  }
+}
