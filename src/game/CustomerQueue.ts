@@ -43,6 +43,12 @@ export class CustomerQueue {
     return this.currentIndex !== 0
   }
 
+  /** Design-space point a delivered coin should fly to (the current customer). */
+  get customerDesign(): { x: number; y: number } {
+    const e = this.customer.entry
+    return { x: e.x, y: e.y }
+  }
+
   begin(): void {
     this.seq = 0
     this.served = 0

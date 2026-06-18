@@ -12,7 +12,6 @@ import { CustomerQueue } from '../game/CustomerQueue'
 import { PatienceBar } from '../game/PatienceBar'
 import { Hearts } from '../game/Hearts'
 import { Buttons } from '../game/Buttons'
-import { DeliverFlow } from '../game/DeliverFlow'
 import { HandHint } from '../game/HandHint'
 import { Vfx } from '../game/Vfx'
 import { SoundManager } from '../game/SoundManager'
@@ -33,7 +32,6 @@ export class GameScene extends Phaser.Scene {
   private patience!: PatienceBar
   private hearts!: Hearts
   private buttons!: Buttons
-  private deliver!: DeliverFlow
   private hand!: HandHint
   private vfx!: Vfx
   private audio!: SoundManager
@@ -46,7 +44,7 @@ export class GameScene extends Phaser.Scene {
   private busy = false
   private bubbleTimer?: Phaser.Time.TimerEvent
   private solvedTracked = false
-  private coinInteractions = 0
+  private clicks = 0
   private lastInteract = 0
 
   constructor() {
@@ -67,14 +65,14 @@ export class GameScene extends Phaser.Scene {
       this.vfx,
       this.audio,
       () => this.onBoardChange(),
-      () => this.onCoinInteract(),
+      () => this.registerClick(),
+      () => this.queue.customerDesign,
     )
     this.queue = new CustomerQueue(this)
     this.patience = new PatienceBar(this, () => this.onPatienceEmpty())
     this.hearts = new Hearts(this)
-    this.deliver = new DeliverFlow(this, this.board, this.vfx)
     this.hand = new HandHint(this)
-    this.buttons = new Buttons(this, this.vfx, this.audio, {
+    this.buttons = new Buttons(this, this.audio, {
       onDeal: () => this.handleDeal(),
       onMerge: () => this.handleMerge(),
     })
@@ -107,12 +105,13 @@ export class GameScene extends Phaser.Scene {
         )
       })
     } else {
-      // Start state: exactly two 1-coins (player merges them into the first 2).
-      this.board.seedTwoOnes()
       this.queue.begin()
+      // Start with a spread of sub-request coins to sort and merge upward.
+      this.board.seedSpread(this.queue.requestValue)
       this.greet()
       this.startCustomerPhase()
       this.lastInteract = this.time.now
+      this.updateButtonHints()
     }
 
     this.ready = true
@@ -145,12 +144,15 @@ export class GameScene extends Phaser.Scene {
       return
     }
     if (this.time.now - this.lastInteract > IDLE_HINT_MS) {
-      // Re-evaluated every frame (idempotent calls): demonstrate the move-merge
-      // gesture by sliding a mergeable stack onto its target; if only an
-      // in-column merge exists, tap MERGE; if nothing is mergeable, point DEAL.
+      // Re-evaluated every frame (idempotent). A full same-value column is ready
+      // -> tap MERGE. Else, demonstrate sorting by sliding matching coins
+      // together. Else nothing to do -> DEAL.
+      if (this.board.hasFullUniform()) {
+        this.hand.pointAt('mergeBtn')
+        return
+      }
       const slide = this.board.mergeHint()
       if (slide) this.hand.slide(slide.from, slide.to)
-      else if (this.board.canMerge()) this.hand.pointAt('mergeBtn')
       else this.hand.pointAt('dealBtn')
     }
   }
@@ -159,42 +161,86 @@ export class GameScene extends Phaser.Scene {
   private handleMerge(): void {
     if (this.ended || this.busy || this.board.isBusy()) return
     this.markInteract()
-    const merged = this.board.randomMerge()
-    if (!merged) {
-      // No valid merge -> wrong buzzer + guide the player to DEAL immediately.
+    this.registerClick() // pressing MERGE counts toward the "2 clicks" iteration
+    // Collapse any full single-value column (gives the change). If the matching
+    // value is collapsed, the customer is served.
+    const did = this.board.collapseFull(this.queue.requestValue, () => this.serveCustomer())
+    if (!did) {
+      // No full column yet -> immediately show the hand guiding the player to
+      // MERGE coins: demonstrate sliding matching coins together to build a full
+      // column. (If there's nothing to combine yet, fall back to DEAL.)
       this.audio.playWrong()
       this.vfx.shake(0.004, 160)
-      this.buttons.pulseDeal()
-      this.hand.pointAt('dealBtn')
+      const slide = this.board.mergeHint()
+      if (slide) this.hand.slide(slide.from, slide.to)
+      else this.hand.pointAt('dealBtn')
       this.lastInteract = this.time.now // keep idle logic from overriding it
       this.time.delayedCall(2600, () => {
         if (!this.ended) this.hand.hide()
       })
-      return
     }
   }
 
   private handleDeal(): void {
     if (this.ended || this.busy || this.board.isBusy()) return
     this.markInteract()
-    const n = this.board.dealLessThan(this.queue.requestValue)
+    this.registerClick() // pressing DEAL counts toward the "2 clicks" iteration
+    // DEAL only fails when the tray is full. If a column is still mergeable, that
+    // is an error -> buzz + guide the player to MERGE ("tap to merge"). If there
+    // is nothing left to merge, the tray is a dead end -> end scene.
+    if (this.board.isFull()) {
+      if (this.board.hasFullUniform()) {
+        this.audio.playWrong()
+        this.vfx.shake(0.004, 160)
+        this.hand.pointAt('mergeBtn') // hand over MERGE + "tap to merge" label
+        this.lastInteract = this.time.now
+        this.time.delayedCall(2600, () => {
+          if (!this.ended) this.hand.hide()
+        })
+      } else {
+        this.endGame()
+      }
+      return
+    }
+    const n = this.board.dealCoins(this.queue.requestValue)
     if (n > 0) this.audio.playCoin()
   }
 
-  /** A coin interaction = tapping a coin column (pick up / move). The "2 clicks"
-   *  iteration ends after two such interactions (NOT merges). */
-  private onCoinInteract(): void {
+  /** Same pulse on both buttons: MERGE pulses whenever a column is mergeable;
+   *  DEAL pulses only when the player can't yet assemble a full column from the
+   *  coins they already hold (so they need to deal more). */
+  private updateButtonHints(): void {
+    if (this.ended || this.busy) {
+      this.buttons.setMergeReady(false)
+      this.buttons.setDealReady(false)
+      return
+    }
+    this.buttons.setMergeReady(this.board.hasFullUniform())
+    this.buttons.setDealReady(!this.board.canFormFullColumn())
+  }
+
+  /** A "click" = any player interaction: tapping a coin column (pick up / move)
+   *  OR pressing DEAL / MERGE. The "2 clicks" iteration ends after two of these. */
+  private registerClick(): void {
     if (this.ended) return
-    this.coinInteractions++
-    if (ITERATION.mode === 'clicks' && this.coinInteractions >= (ITERATION.limit ?? 2)) {
+    this.clicks++
+    if (ITERATION.mode === 'clicks' && this.clicks >= (ITERATION.limit ?? 2)) {
       this.time.delayedCall(600, () => this.endGame())
     }
   }
 
-  /** Fired by the board after any move/merge/deal settles. */
+  /** Fired by the board after any move/deal/merge settles. Ends the game if the
+   *  tray filled up with nothing left to merge; otherwise refreshes the
+   *  MERGE/DEAL attention pulses. */
   private onBoardChange(): void {
     if (this.ended) return
-    this.tryDeliver()
+    // A full tray with nothing left to merge is a dead end -> end scene. If a
+    // column is still mergeable, keep playing (the MERGE pulse guides the player).
+    if (this.board.isFull() && !this.board.hasFullUniform()) {
+      this.endGame()
+      return
+    }
+    this.updateButtonHints()
   }
 
   private greet(): void {
@@ -212,22 +258,14 @@ export class GameScene extends Phaser.Scene {
     })
   }
 
-  // ---- delivery -----------------------------------------------------------
-  private tryDeliver(): void {
-    const req = this.queue.requestValue
-    if (!this.board.hasValue(req)) return
-    const coin = this.board.takeValue(req)
-    if (!coin) return
-    this.busy = true
+  // ---- serving (a full column of the requested value was merged) ----------
+  private serveCustomer(): void {
+    this.audio.playDeliver()
     this.bubbleTimer?.remove()
+    this.busy = true
     this.board.setLocked(true)
     this.buttons.setEnabled(false)
-    this.queue.bubble.pop()
-    this.deliver.deliver(coin, this.queue.bubble.badgeScreen, () => this.onDelivered())
-  }
-
-  private onDelivered(): void {
-    this.audio.playDeliver()
+    this.updateButtonHints() // stop the pulses while the customer is served
     this.queue.markServed()
     if (!this.solvedTracked) {
       this.solvedTracked = true
@@ -240,6 +278,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.patience.stop()
+    this.queue.bubble.pop()
     this.queue.leaveCurrent(() => {
       const more = this.queue.next()
       if (more) {
@@ -249,6 +288,7 @@ export class GameScene extends Phaser.Scene {
         this.greet()
         this.startCustomerPhase()
         this.markInteract()
+        this.updateButtonHints()
       } else {
         this.endGame() // full sequence complete
       }
@@ -279,6 +319,7 @@ export class GameScene extends Phaser.Scene {
     this.bubbleTimer?.remove()
     this.board.setLocked(true)
     this.buttons.setEnabled(false)
+    this.updateButtonHints() // stop any attention pulses
     this.patience.stop()
     this.hand.hide()
     notifyGameEnd()

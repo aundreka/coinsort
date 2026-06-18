@@ -72,7 +72,7 @@ export const TRAY = {
   insetTop: 0.18,
   insetBottom: 0.16,
   // coin display width as a fraction of one cell width
-  coinCellW: 0.78,
+  coinCellW: 0.84,
 } as const
 
 // Coin values run 1..6 (matching 1-coin.png .. 6-coin.png).

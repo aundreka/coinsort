@@ -128,5 +128,6 @@ export class Coin {
     this.image.setVisible(false)
     this.image.setDepth(DEPTH.COIN)
     this.image.setAngle(0)
+    this.image.setAlpha(1) // reset (collapse fades coins out before release)
   }
 }

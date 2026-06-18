@@ -1,6 +1,6 @@
 import Phaser from 'phaser'
 import { DEPTH, ART } from '../constants'
-import { sx, sy, sd } from '../utils/responsive'
+import { sx, sy, sd, viewW, viewH } from '../utils/responsive'
 import { layoutOf } from '../layout'
 
 type Pt = { x: number; y: number }
@@ -98,16 +98,15 @@ export class HandHint {
     })
   }
 
-  /** "tap to merge coins" — pinned to the center of the tray. */
+  /** "tap to merge coins" — pinned to the center of the screen. */
   private layoutLabel(show: boolean): void {
     if (!show) {
       this.label.setVisible(false)
       return
     }
-    const tray = layoutOf('tray')
     this.label
       .setVisible(true)
-      .setPosition(sx(tray.x), sy(tray.y))
+      .setPosition(viewW() / 2, viewH() / 2)
       .setDisplaySize(sd(ART.tapHint[0] * 0.7), sd(ART.tapHint[1] * 0.7))
   }
 

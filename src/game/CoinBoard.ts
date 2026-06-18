@@ -4,19 +4,19 @@ import type { CoinPool } from './CoinPool'
 import type { Coin } from './Coin'
 import type { Vfx } from './Vfx'
 import type { SoundManager } from './SoundManager'
-import { DEPTH, COIN_MAX, ART } from '../constants'
+import { DEPTH, COIN_MAX, ART, TRAY } from '../constants'
 import { sx, sy, sd } from '../utils/responsive'
 import { isEditEnabled } from '../edit/registry'
 
 // Column-stack coin model. Each tray cell is a column holding a stack of coins
-// (bottom->top). Tap a column to LIFT its top run of equal coins; tap another
-// column to MOVE them there (as many as fit) — equal tops then merge (two of N
-// -> one N+1, cascading). The MERGE button performs one random valid merge.
-const MAX_H = 5 // coins per column (capacity)
-const STEP_FRAC = 0.34 // vertical pile step, fraction of coin height
+// (bottom->top, where bottom = the FRONT/near coin). Tap a column to LIFT its
+// FRONT run of equal coins; tap another column to MOVE them onto the BACK (top)
+// of that pile. MERGE turns any FULL single-value column into one higher coin.
+const MAX_H = 10 // coins per column (capacity)
+const STEP_FRAC = 0.21 // vertical pile step, fraction of coin height (fills the column without over-spreading)
 const LIFT_FRAC = 0.9 // lift height, fraction of coin width
-const INWARD_FRAC = 0.02 // horizontal lean per stack level, toward the tray center
-const DEAL_MAX = 2 // DEAL only ever gives 1s and 2s
+const INWARD_FRAC = 0.008 // horizontal lean per stack level, toward the tray center (subtle 3D)
+const ROW_BAND = 20 // depth gap so the FRONT tray row always draws over the back row
 
 export class CoinBoard {
   private cols: Coin[][]
@@ -34,6 +34,8 @@ export class CoinBoard {
     private sound: SoundManager,
     private onChange: () => void,
     private onInteract: () => void = () => {},
+    // Design-space point the merged change-coin flies to when it's delivered.
+    private deliverTarget: () => { x: number; y: number } = () => ({ x: 540, y: 700 }),
   ) {
     this.cols = Array.from({ length: tray.slotCount }, () => [] as Coin[])
     if (!isEditEnabled()) this.createZones()
@@ -45,6 +47,11 @@ export class CoinBoard {
 
   isEmpty(): boolean {
     return this.cols.every((c) => c.length === 0)
+  }
+
+  /** Every column is at capacity — no room to deal (the only DEAL fail state). */
+  isFull(): boolean {
+    return this.cols.every((c) => c.length >= MAX_H)
   }
 
   /** Lock all interaction (during delivery / end). Lowers any lifted run. */
@@ -69,21 +76,28 @@ export class CoinBoard {
     return slot.x + (this.tray.placeable.entry.x - slot.x) * INWARD_FRAC * k
   }
 
-  // Depth so the stack layers correctly regardless of spawn order. The stack
-  // recedes UP-and-back, so a coin higher in the stack (the latest) sits BEHIND
-  // the ones below it: depth DECREASES with k. (lifted band stays on top.)
-  private coinDepth(k: number, lifted: boolean): number {
-    return (lifted ? DEPTH.COIN_POP : DEPTH.COIN) + (MAX_H - k)
+  // Depth so coins layer naturally. Two independent axes:
+  //  - The FRONT tray row (cols 5..9) always draws over the back row (cols 0..4)
+  //    via ROW_BAND — this is what was missing before and made transferred coins
+  //    look like they "teleported to the back" on landing.
+  //  - Within a column the stack RECEDES up-and-back: the TOP coin sits BEHIND
+  //    the ones below it (depth DECREASES with k), so the pile reads as a 3D
+  //    tower. (lifted band stays above all resting coins.)
+  private coinDepth(col: number, k: number, lifted: boolean): number {
+    const row = Math.floor(col / TRAY.cols)
+    return (lifted ? DEPTH.COIN_POP : DEPTH.COIN) + row * ROW_BAND + (MAX_H - k)
   }
 
   private placeColumn(col: number, animate: boolean): void {
     const stack = this.cols[col]
     const w = this.tray.coinWidth()
-    const liftStart = col === this.selected ? stack.length - this.liftN : stack.length
+    // The lifted group is the FRONT run (the bottom k=0..liftN-1 coins) — the
+    // near, fully-visible coins, so lifting reads as pulling off the front.
+    const liftCount = col === this.selected ? this.liftN : 0
     for (let k = 0; k < stack.length; k++) {
       const coin = stack[k]
-      const lifted = k >= liftStart
-      coin.image.setDepth(this.coinDepth(k, lifted))
+      const lifted = k < liftCount
+      coin.image.setDepth(this.coinDepth(col, k, lifted))
       const x = this.coinX(col, k)
       const y = this.coinY(col, k, lifted)
       if (animate) {
@@ -106,7 +120,7 @@ export class CoinBoard {
     const k = this.cols[col].length - 1
     const x = this.coinX(col, k)
     const y = this.coinY(col, k, false)
-    coin.image.setDepth(this.coinDepth(k, false))
+    coin.image.setDepth(this.coinDepth(col, k, false))
     if (drop) {
       coin.place(x, y - this.tray.coinWidth() * 0.6, w)
       coin.moveTo(this.scene, x, y, 240, 'Bounce.easeOut')
@@ -121,36 +135,55 @@ export class CoinBoard {
     for (let i = 0; i < this.tray.slotCount; i++) this.addCoin(i, (i % COIN_MAX) + 1)
   }
 
-  /** Start state: exactly two 1-coins, in two spread columns. */
-  seedTwoOnes(): void {
-    const a = Math.floor(this.tray.slotCount * 0.3)
-    const b = Math.floor(this.tray.slotCount * 0.7)
-    this.addCoin(a, 1)
-    this.addCoin(b === a ? b + 1 : b, 1)
+  /** Pick a coin value to supply. The deal NEVER gives a value >= the customer's
+   *  request (you must MERGE up to the requested value), and never a 4. Lower
+   *  values are rarer to find the higher you go — 1s most common, then 2s, then
+   *  3s (weight halves each step). So the first customer (wants 2) only ever
+   *  gets 1s. */
+  private dealValue(reqValue: number): number {
+    const maxV = Math.min(reqValue - 1, COIN_MAX - 1, 3) // < request, never a 4
+    if (maxV <= 1) return 1
+    let total = 0
+    const weights: number[] = []
+    for (let v = 1; v <= maxV; v++) {
+      const w = 1 / Math.pow(2, v - 1) // 1, 0.5, 0.25...
+      weights.push(w)
+      total += w
+    }
+    let r = Math.random() * total
+    for (let v = 1; v <= maxV; v++) {
+      r -= weights[v - 1]
+      if (r <= 0) return v
+    }
+    return 1
   }
 
-  /** DEAL: add a few base coins — values below the request, and never above 2
-   *  (so the 3rd round, which needs a 4, only ever gets 1s and 2s). */
-  dealLessThan(req: number): number {
-    const maxV = Math.max(1, Math.min(req - 1, DEAL_MAX))
+  /** Start state: a spread of (sub-request) coins to sort, with one column given
+   *  a head start so the first merge is quickly reachable in the demo. */
+  seedSpread(reqValue: number): void {
+    const head = Math.floor(Math.random() * this.cols.length)
+    for (let j = 0; j < 6; j++) this.addCoin(head, this.dealValue(reqValue), false)
+    for (let i = 0; i < this.cols.length; i++) {
+      if (i === head) continue
+      const count = 1 + Math.floor(Math.random() * 2)
+      for (let j = 0; j < count; j++) this.addCoin(i, this.dealValue(reqValue), false)
+    }
+  }
+
+  /** DEAL: drop a few coins (always below the request value, see dealValue) into
+   *  random columns. Coins do NOT merge on placement — the player sorts them,
+   *  then MERGE turns a full same-value column into one higher coin. */
+  dealCoins(reqValue: number): number {
     let added = 0
-    for (let t = 0; t < 3; t++) {
+    for (let t = 0; t < 4; t++) {
       const avail: number[] = []
-      for (let i = 0; i < this.cols.length; i++) if (this.cols[i].length < MAX_H) avail.push(i)
+      // Never deal into the lifted column (the new coin would hide behind it).
+      for (let i = 0; i < this.cols.length; i++) {
+        if (i !== this.selected && this.cols[i].length < MAX_H) avail.push(i)
+      }
       if (avail.length === 0) break
-      // DEAL only SUPPLIES coins (values below the request). It must never create
-      // an adjacent same-value pair — so place each coin with a value different
-      // from that column's top (or into an empty column). Skip if impossible.
-      // This keeps DEAL from merging (which could chain to the target and win);
-      // the player creates adjacency — and merges — by MOVING coins.
       const col = avail[Math.floor(Math.random() * avail.length)]
-      const stack = this.cols[col]
-      const top = stack.length ? stack[stack.length - 1].value : 0
-      const vals: number[] = []
-      for (let v = 1; v <= maxV; v++) if (v !== top) vals.push(v)
-      if (vals.length === 0) continue // can't place without matching the top
-      const val = vals[Math.floor(Math.random() * vals.length)]
-      if (this.addCoin(col, val, true)) added++
+      if (this.addCoin(col, this.dealValue(reqValue), true)) added++
     }
     if (added) this.onChange()
     return added
@@ -166,16 +199,24 @@ export class CoinBoard {
     } else if (this.selected === i) {
       this.deselect() // putting it back down — not counted
     } else {
-      this.moveSelectedTo(i)
-      this.onInteract() // moving onto another column = a coin interaction
+      // Count only a real move (a coin actually changed columns); a blocked
+      // move onto a full column just puts the stack back down.
+      if (this.moveSelectedTo(i)) this.onInteract()
     }
   }
 
   private select(i: number): void {
     const stack = this.cols[i]
     if (stack.length === 0) return
+    // Lift the FRONT RUN of same-value coins (from the bottom up). These are the
+    // near, visible coins, so the group lifts cleanly off the front instead of
+    // phasing up from behind — and it lets you pull a value out from under
+    // others, which keeps tricky boards solvable.
+    const frontV = stack[0].value
+    let n = 0
+    for (let k = 0; k < stack.length && stack[k].value === frontV; k++) n++
     this.selected = i
-    this.liftN = stack.length // the WHOLE column is picked up
+    this.liftN = n
     this.placeColumn(i, true)
     this.sound.playPickup()
   }
@@ -187,7 +228,8 @@ export class CoinBoard {
     if (i >= 0) this.placeColumn(i, true)
   }
 
-  private moveSelectedTo(dest: number): void {
+  /** Returns true if coins actually moved (false if the destination was full). */
+  private moveSelectedTo(dest: number): boolean {
     const src = this.selected
     const n = this.liftN
     // Move as many as the destination can take (capacity MAX_H); any extra stay.
@@ -196,18 +238,20 @@ export class CoinBoard {
     const moveN = Math.min(n, cap)
     if (moveN <= 0) {
       this.deselect() // destination full
-      return
+      return false
     }
     this.busy = true
-    const moving = this.cols[src].splice(this.cols[src].length - moveN, moveN)
+    // Take the FRONT coins (the lifted run) off the bottom; the coins behind them
+    // settle forward to fill. They get appended to the BACK (top) of the dest.
+    const moving = this.cols[src].splice(0, moveN)
     this.selected = -1
     this.liftN = 0
-    this.placeColumn(src, true) // lower any leftover (didn't fit) coins
+    this.placeColumn(src, true) // settle the coins that were behind / didn't fit
 
     // Transfer one coin at a time (staggered): each is THROWN along an arc with a
-    // heavy ease and a sparkle on landing. Flight depth is ordered to match the
-    // final stack (latest behind) and each coin settles to its final depth the
-    // moment it lands, so there's no reversed-then-snap.
+    // heavy ease and a sparkle on landing. The coin flies at its FINAL stack
+    // depth the whole way (the new top coin = behind), so it tucks correctly
+    // behind the coins below it instead of flashing in front during the throw.
     const baseLen = this.cols[dest].length
     const N = moving.length
     const STAGGER = 60
@@ -218,9 +262,9 @@ export class CoinBoard {
       const coin = moving[j]
       coin.slot = dest
       this.cols[dest].push(coin)
-      coin.image.setDepth(DEPTH.COIN_DRAG + (N - j)) // above the board, correct order
-      coin.setWidth(this.tray.coinWidth())
       const k = baseLen + j
+      coin.image.setDepth(this.coinDepth(dest, k, false)) // settle into the pile in z from the start
+      coin.setWidth(this.tray.coinWidth())
       const x = this.coinX(dest, k)
       const y = this.coinY(dest, k, false)
       coin.arcTo(
@@ -231,11 +275,11 @@ export class CoinBoard {
         ARC,
         'Cubic.easeInOut',
         () => {
-          coin.image.setDepth(this.coinDepth(k, false)) // settle into the stack at once
           this.vfx.sparkle(sx(x), sy(y), 5)
           this.sound.playCoin()
           if (--pending === 0) {
-            this.resolveColumn(dest)
+            // No merge on move — coins just stack (sort). MERGE collapses a full
+            // uniform column.
             this.placeColumn(dest, false)
             this.busy = false
             this.onChange()
@@ -245,49 +289,148 @@ export class CoinBoard {
         360, // rotate sideways as it flies
       )
     }
+    return true
   }
 
-  /** Merge ALL adjacent equal coins in a column (two of N -> one N+1), anywhere
-   *  in the stack, cascading until stable. Same-value coins only fail to merge
-   *  if a different-value coin sits between them. */
-  private resolveColumn(col: number): boolean {
-    const stack = this.cols[col]
-    let mergedAny = false
-    for (let pass = true; pass; ) {
-      pass = false
-      for (let k = 0; k < stack.length - 1; k++) {
-        const lower = stack[k]
-        const upper = stack[k + 1]
-        if (lower.value === upper.value && lower.value < COIN_MAX) {
-          lower.setValue(lower.value + 1)
-          stack.splice(k + 1, 1)
-          this.pool.release(upper)
-          this.vfx.cloudPuff(lower.image.x, lower.image.y, 150)
-          this.vfx.pop(lower.image, 1.3, 200)
-          this.sound.playMerge()
-          mergedAny = true
-          pass = true
-          break // stack changed — rescan from the bottom
-        }
+  private isFullUniform(col: number): boolean {
+    const st = this.cols[col]
+    return st.length === MAX_H && st.every((c) => c.value === st[0].value)
+  }
+
+  /** Whether any column is completely full of one value (ready to MERGE). */
+  hasFullUniform(): boolean {
+    if (this.busy || this.locked) return false
+    for (let i = 0; i < this.cols.length; i++) if (this.isFullUniform(i)) return true
+    return false
+  }
+
+  /** Whether the player already holds enough coins of a single value (across all
+   *  columns) to consolidate into one full column — i.e. they can build a
+   *  mergeable column by sorting and don't need to DEAL more. */
+  canFormFullColumn(): boolean {
+    if (this.busy || this.locked) return false
+    const counts = new Map<number, number>()
+    for (const col of this.cols) {
+      for (const coin of col) {
+        const c = (counts.get(coin.value) ?? 0) + 1
+        if (c >= MAX_H) return true
+        counts.set(coin.value, c)
       }
     }
-    if (mergedAny) this.placeColumn(col, false)
-    return mergedAny
+    return false
   }
 
-  /** Whether any valid merge exists right now (drives the idle hand target). */
-  canMerge(): boolean {
+  /** MERGE: turn every FULL, single-value column (N coins of value V) into ONE
+   *  coin of value V+1. If that higher coin equals the customer's request it is
+   *  DELIVERED (arcs up to them) and onMatch fires; otherwise it STAYS as the
+   *  column's single new coin. Returns false if no column is full+uniform yet
+   *  (an invalid MERGE press). */
+  collapseFull(matchValue: number, onMatch: () => void): boolean {
     if (this.busy || this.locked) return false
-    const seenTop = new Set<number>()
-    for (const st of this.cols) {
-      if (st.length === 0) continue
-      const tv = st[st.length - 1].value
-      if (tv >= COIN_MAX) continue
-      if (st.length >= 2 && st[st.length - 2].value === tv) return true // in-column pair
-      if (seenTop.has(tv)) return true // two columns share a top value
-      seenTop.add(tv)
+    const targets: number[] = []
+    for (let i = 0; i < this.cols.length; i++) if (this.isFullUniform(i)) targets.push(i)
+    if (targets.length === 0) return false
+    if (this.selected >= 0) this.deselect()
+    this.busy = true
+    let matched = false
+    let pending = targets.length
+    for (const col of targets) {
+      const newValue = Math.min(this.cols[col][0].value + 1, COIN_MAX)
+      const deliver = newValue === matchValue
+      if (deliver) matched = true
+      this.mergeColumn(col, newValue, deliver, () => {
+        if (--pending === 0) {
+          this.busy = false
+          if (matched) onMatch()
+          this.onChange()
+        }
+      })
     }
-    return false
+    return true
+  }
+
+  /** Merge a full column: its coins converge into the slot (shrink + fade) and a
+   *  single higher coin pops into being with a glow. */
+  private mergeColumn(col: number, newValue: number, deliver: boolean, onDone: () => void): void {
+    const coins = this.cols[col].slice()
+    this.cols[col] = []
+    const slot = this.tray.slotCenter(col)
+    const cx = slot.x
+    const cy = slot.y
+    this.sound.playMerge()
+    let pending = coins.length
+    for (let k = 0; k < coins.length; k++) {
+      const coin = coins[k]
+      coin.image.setDepth(this.coinDepth(col, k, true))
+      const s = coin.image.scaleX
+      this.scene.tweens.add({
+        targets: coin.image,
+        x: sx(cx),
+        y: sy(cy),
+        scaleX: s * 0.25,
+        scaleY: s * 0.25,
+        alpha: 0,
+        duration: 280,
+        delay: k * 22,
+        ease: 'Back.easeIn',
+        onComplete: () => {
+          this.pool.release(coin)
+          if (--pending === 0) this.spawnMerged(col, newValue, cx, cy, deliver, onDone)
+        },
+      })
+    }
+  }
+
+  /** The higher coin that a merge produces: appears in the slot with a glow, then
+   *  either flies to the customer (deliver) or settles as the column's new coin. */
+  private spawnMerged(
+    col: number,
+    newValue: number,
+    cx: number,
+    cy: number,
+    deliver: boolean,
+    onDone: () => void,
+  ): void {
+    const coin = this.pool.obtain(newValue)
+    if (!coin) {
+      onDone()
+      return
+    }
+    coin.image.setDepth(this.coinDepth(col, 0, true))
+    coin.place(cx, cy, this.tray.coinWidth())
+    // Glow upon merging.
+    this.vfx.glowBurst(sx(cx), sy(cy), 240, 0xfff0a0)
+    this.vfx.cloudPuff(sx(cx), sy(cy), 150)
+    this.vfx.pop(coin.image, 1.35, 240)
+    if (deliver) {
+      // The merged coin is the customer's change — arc it up to them, then serve.
+      this.scene.time.delayedCall(220, () => this.deliverCoin(coin, onDone))
+    } else {
+      coin.image.setDepth(this.coinDepth(col, 0, false))
+      this.cols[col].push(coin)
+      onDone()
+    }
+  }
+
+  /** Throw the merged coin in an arc up to the customer, then release it. */
+  private deliverCoin(coin: Coin, onDone: () => void): void {
+    const t = this.deliverTarget()
+    coin.image.setDepth(DEPTH.DELIVER)
+    coin.arcTo(
+      this.scene,
+      t.x,
+      t.y - 80,
+      560,
+      300,
+      'Cubic.easeOut',
+      () => {
+        this.vfx.glowBurst(sx(t.x), sy(t.y - 80), 260, 0xfff0a0)
+        this.pool.release(coin)
+        onDone()
+      },
+      0,
+      360,
+    )
   }
 
   /** A cross-column merge to demo: screen coords of a source stack and the
@@ -295,19 +438,20 @@ export class CoinBoard {
    *  cross-column merge exists (the idle hint then points at MERGE/DEAL). */
   mergeHint(): { from: { x: number; y: number }; to: { x: number; y: number } } | null {
     if (this.busy || this.locked) return null
-    const byTop = new Map<number, number[]>()
+    // Key off the FRONT (bottom) value — that's the run a tap actually lifts.
+    const byFront = new Map<number, number[]>()
     for (let i = 0; i < this.cols.length; i++) {
       const st = this.cols[i]
       if (st.length === 0) continue
-      const tv = st[st.length - 1].value
-      if (tv >= COIN_MAX) continue
-      const list = byTop.get(tv) ?? []
+      const fv = st[0].value
+      if (fv >= COIN_MAX) continue
+      const list = byFront.get(fv) ?? []
       list.push(i)
-      byTop.set(tv, list)
+      byFront.set(fv, list)
     }
     let bestV = Infinity
     let pair: number[] | null = null
-    for (const [v, idxs] of byTop) {
+    for (const [v, idxs] of byFront) {
       if (idxs.length >= 2 && v < bestV) {
         bestV = v
         pair = idxs
@@ -317,99 +461,6 @@ export class CoinBoard {
     const a = this.tray.slotCenter(pair[0])
     const b = this.tray.slotCenter(pair[1])
     return { from: { x: sx(a.x), y: sy(a.y) }, to: { x: sx(b.x), y: sy(b.y) } }
-  }
-
-  /** MERGE button: perform one random valid merge. Returns false if none. */
-  randomMerge(): boolean {
-    if (this.busy || this.locked) return false
-    const inCol: number[] = []
-    const byTop = new Map<number, number[]>()
-    for (let i = 0; i < this.cols.length; i++) {
-      const st = this.cols[i]
-      if (st.length === 0) continue
-      const tv = st[st.length - 1].value
-      if (tv >= COIN_MAX) continue
-      if (st.length >= 2 && st[st.length - 2].value === tv) inCol.push(i)
-      const list = byTop.get(tv) ?? []
-      list.push(i)
-      byTop.set(tv, list)
-    }
-    type Opt = { type: 'in'; i: number } | { type: 'cross'; a: number; b: number }
-    const opts: Opt[] = inCol.map((i) => ({ type: 'in', i }) as Opt)
-    for (const idxs of byTop.values()) if (idxs.length >= 2) opts.push({ type: 'cross', a: idxs[0], b: idxs[1] })
-    if (opts.length === 0) return false
-
-    const opt = opts[Math.floor(Math.random() * opts.length)]
-    if (opt.type === 'in') {
-      this.resolveColumn(opt.i)
-      this.onChange()
-    } else {
-      this.busy = true
-      const coin = this.cols[opt.a].pop()
-      if (!coin) {
-        this.busy = false
-        return false
-      }
-      this.placeColumn(opt.a, false)
-      coin.slot = opt.b
-      this.cols[opt.b].push(coin)
-      coin.image.setDepth(DEPTH.COIN_DRAG)
-      coin.setWidth(this.tray.coinWidth())
-      const k = this.cols[opt.b].length - 1
-      const x = this.coinX(opt.b, k)
-      const y = this.coinY(opt.b, k, false)
-      coin.arcTo(
-        this.scene,
-        x,
-        y,
-        260,
-        120,
-        'Cubic.easeInOut',
-        () => {
-          coin.image.setDepth(this.coinDepth(k, false))
-          this.vfx.sparkle(sx(x), sy(y), 5)
-          this.resolveColumn(opt.b)
-          this.placeColumn(opt.b, false)
-          this.busy = false
-          this.onChange()
-        },
-        0,
-        360, // rotate sideways as it flies
-      )
-    }
-    return true
-  }
-
-  // ---- delivery -----------------------------------------------------------
-  hasValue(v: number): boolean {
-    for (const st of this.cols) for (const c of st) if (c.value === v) return true
-    return false
-  }
-
-  /** Remove one coin of value v (prefer a column top) and return it. */
-  takeValue(v: number): Coin | null {
-    for (let i = 0; i < this.cols.length; i++) {
-      const st = this.cols[i]
-      if (st.length && st[st.length - 1].value === v) {
-        const c = st.pop()!
-        this.placeColumn(i, false)
-        return c
-      }
-    }
-    for (let i = 0; i < this.cols.length; i++) {
-      const st = this.cols[i]
-      const idx = st.findIndex((c) => c.value === v)
-      if (idx >= 0) {
-        const c = st.splice(idx, 1)[0]
-        this.placeColumn(i, false)
-        return c
-      }
-    }
-    return null
-  }
-
-  release(coin: Coin): void {
-    this.pool.release(coin)
   }
 
   // ---- input zones + relayout --------------------------------------------
