@@ -36,8 +36,13 @@ export class EndCard {
     this.shown = true
     trackEvent('ENDCARD_SHOWN')
 
+    // Oversized + screen-pinned so AppLovin's portrait viewport quirks (a
+    // mis-reported width / offset) can't leave the dim clipped at an edge — the
+    // overflow is simply off-screen.
+    const big = Math.max(viewW(), viewH()) * 3
     this.dim = this.scene.add
-      .rectangle(viewW() / 2, viewH() / 2, viewW(), viewH(), 0x10182e, 0.92)
+      .rectangle(viewW() / 2, viewH() / 2, big, big, 0x10182e, 0.92)
+      .setScrollFactor(0)
       .setDepth(DEPTH.ENDCARD)
     this.sunrays = new Placeable(this.scene, 'sunrays', 'sunrays', { depthBase: DEPTH.ENDCARD + 1 })
     this.sunrays.image.setAlpha(0.85)
@@ -47,7 +52,8 @@ export class EndCard {
     if (interactive) {
       // Full-screen catcher so a tap ANYWHERE redirects (PDF requirement).
       this.input = this.scene.add
-        .rectangle(viewW() / 2, viewH() / 2, viewW(), viewH(), 0x000000, 0.001)
+        .rectangle(viewW() / 2, viewH() / 2, big, big, 0x000000, 0.001)
+        .setScrollFactor(0)
         .setDepth(DEPTH.ENDCARD_INPUT)
         .setInteractive({ useHandCursor: true })
       this.input.on('pointerdown', () => this.redirectToStore())
@@ -90,8 +96,9 @@ export class EndCard {
 
   relayout(): void {
     if (!this.shown) return
-    this.dim?.setPosition(viewW() / 2, viewH() / 2).setSize(viewW(), viewH())
-    this.input?.setPosition(viewW() / 2, viewH() / 2).setSize(viewW(), viewH())
+    const big = Math.max(viewW(), viewH()) * 3
+    this.dim?.setPosition(viewW() / 2, viewH() / 2).setSize(big, big)
+    this.input?.setPosition(viewW() / 2, viewH() / 2).setSize(big, big)
     this.sunrays?.relayout()
     this.logo?.relayout()
     this.cta?.relayout()

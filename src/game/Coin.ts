@@ -12,6 +12,7 @@ export class Coin {
   private dx = 0
   private dy = 0
   private dw = 0
+  private tween?: Phaser.Tweens.Tween
 
   constructor(scene: Phaser.Scene) {
     this.image = scene.add
@@ -27,12 +28,18 @@ export class Coin {
     this.applySize()
   }
 
-  /** Place at a design-space center with a design-space width (instant). */
+  /** Place at a design-space center with a design-space width (instant). This is
+   *  authoritative: it cancels any in-flight moveTo/arcTo first, so a tween whose
+   *  screen target was computed at the OLD viewport scale can't keep running after
+   *  a resize and drag the coin off the spot relayout just placed it. */
   place(dx: number, dy: number, dw: number): void {
     this.dx = dx
     this.dy = dy
     this.dw = dw
+    this.tween?.remove()
+    this.tween = undefined
     this.image.setVisible(true)
+    this.image.setAngle(0)
     this.image.setPosition(sx(dx), sy(dy))
     this.applySize()
   }
@@ -50,7 +57,19 @@ export class Coin {
     this.dx = dx
     this.dy = dy
     this.image.setVisible(true)
-    scene.tweens.add({ targets: this.image, x: sx(dx), y: sy(dy), duration, ease, delay, onComplete })
+    this.tween?.remove()
+    this.tween = scene.tweens.add({
+      targets: this.image,
+      x: sx(dx),
+      y: sy(dy),
+      duration,
+      ease,
+      delay,
+      onComplete: () => {
+        this.tween = undefined
+        onComplete?.()
+      },
+    })
   }
 
   /** Throw to a new design-space center along an arc (parabolic hop), keeping
@@ -77,7 +96,8 @@ export class Coin {
     const arc = sd(arcDesignH)
     const spin = (toX >= fromX ? 1 : -1) * spinDeg // roll in the travel direction
     const o = { t: 0 }
-    scene.tweens.add({
+    this.tween?.remove()
+    this.tween = scene.tweens.add({
       targets: o,
       t: 1,
       duration,
@@ -89,11 +109,21 @@ export class Coin {
         this.image.angle = spin * o.t // rotate sideways as it flies
       },
       onComplete: () => {
+        this.tween = undefined
         this.image.setPosition(toX, toY)
         this.image.setAngle(0)
         onComplete?.()
       },
     })
+  }
+
+  /** Halt any in-flight moveTo/arcTo tween (e.g. to undo a transfer mid-flight).
+   *  Resets angle: a thrown coin spins (arcTo) and only un-rotates in its
+   *  onComplete, so halting it mid-flight would otherwise freeze it tilted. */
+  stopTween(): void {
+    this.tween?.remove()
+    this.tween = undefined
+    this.image.setAngle(0)
   }
 
   /** Raise above the stack (selected/lifted) or return to the resting band. */

@@ -34,7 +34,7 @@
   {
     "key": "tray",
     "x": 559,
-    "y": 1252,
+    "y": 1246,
     "scale": 1,
     "zIndex": 6,
     "mode": "fit"
@@ -129,32 +129,32 @@
   },
   {
     "key": "slot0",
-    "x": 288,
-    "y": 1144,
+    "x": 285,
+    "y": 1010,
     "scale": 1,
     "zIndex": 0,
     "mode": "fit"
   },
   {
     "key": "slot1",
-    "x": 423,
-    "y": 1144,
+    "x": 422,
+    "y": 1014,
     "scale": 1,
     "zIndex": 0,
     "mode": "fit"
   },
   {
     "key": "slot2",
-    "x": 559,
-    "y": 1148,
+    "x": 557,
+    "y": 1017,
     "scale": 1,
     "zIndex": 0,
     "mode": "fit"
   },
   {
     "key": "slot3",
-    "x": 700,
-    "y": 1144,
+    "x": 696,
+    "y": 1014,
     "scale": 1,
     "zIndex": 0,
     "mode": "fit"
@@ -162,48 +162,48 @@
   {
     "key": "slot4",
     "x": 833,
-    "y": 1144,
+    "y": 1010,
     "scale": 1,
     "zIndex": 0,
     "mode": "fit"
   },
   {
     "key": "slot5",
-    "x": 247,
-    "y": 1403,
-    "scale": 1,
+    "x": 249,
+    "y": 1269,
+    "scale": 0.94,
     "zIndex": 0,
     "mode": "fit"
   },
   {
     "key": "slot6",
     "x": 401,
-    "y": 1401,
-    "scale": 1,
+    "y": 1269,
+    "scale": 0.94,
     "zIndex": 0,
     "mode": "fit"
   },
   {
     "key": "slot7",
-    "x": 559,
-    "y": 1404,
-    "scale": 1,
+    "x": 560,
+    "y": 1266,
+    "scale": 0.96,
     "zIndex": 0,
     "mode": "fit"
   },
   {
     "key": "slot8",
-    "x": 715,
-    "y": 1405,
-    "scale": 1,
+    "x": 717,
+    "y": 1269,
+    "scale": 0.94,
     "zIndex": 0,
     "mode": "fit"
   },
   {
     "key": "slot9",
-    "x": 864,
-    "y": 1401,
-    "scale": 1,
+    "x": 869,
+    "y": 1269,
+    "scale": 0.94,
     "zIndex": 0,
     "mode": "fit"
   }

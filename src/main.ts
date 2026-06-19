@@ -92,9 +92,17 @@ function poll(): void {
   requestAnimationFrame(poll)
 }
 
+// Drop a held coin stack + guard input the instant a resize is signalled, before
+// the debounced relayout — so an SDK's synthetic resize-tap can't merge it.
+function signalResize(): void {
+  const gs = game?.scene.getScene('Game') as GameScene | undefined
+  if (gs && gs.scene.isActive()) gs.onViewportResizing()
+}
+
 function bindResize(): void {
   let raf = 0
   const debounced = (): void => {
+    signalResize()
     if (raf) cancelAnimationFrame(raf)
     raf = requestAnimationFrame(applySize)
   }
@@ -105,6 +113,21 @@ function bindResize(): void {
     debounced()
     for (const t of [100, 300, 600]) setTimeout(applySize, t)
   })
+
+  // Capture-phase: BEFORE Phaser handles a tap, reconcile a pending size change.
+  // Some ad SDKs (AppLovin's device switch) resize the creative and then deliver
+  // a tap; applying the resize first drops a held stack + guards input, so the
+  // tap can't merge a lifted stack into a column that just shifted. Reads layout
+  // only on a press (rare), and only acts when the size actually changed.
+  const reconcile = (): void => {
+    const { w, h } = viewportSize()
+    const changed = Math.abs(w - lastW) > 0.5 || Math.abs(h - lastH) > 0.5
+    if (changed) applySize()
+  }
+  for (const type of ['pointerdown', 'mousedown', 'touchstart']) {
+    window.addEventListener(type, reconcile, { capture: true, passive: true })
+  }
+
   requestAnimationFrame(poll)
 }
 

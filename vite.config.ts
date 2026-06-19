@@ -36,10 +36,20 @@ function cleanOutput(): Plugin {
   }
 }
 
+// Force every connected client to reload after a save. Writing src/*.json from
+// inside the dev server doesn't reliably trip Vite's file watcher (so the edited
+// values never reach the running game), so we tell the browser to reload
+// explicitly — that re-imports the freshly written JSON. Works across the
+// `server.hot` (Vite 6+) and legacy `server.ws` channels.
+function fullReload(server: { hot?: { send: (p: unknown) => void }; ws?: { send: (p: unknown) => void } }): void {
+  const channel = server.hot ?? server.ws
+  channel?.send({ type: 'full-reload', path: '*' })
+}
+
 // Dev-only middleware that persists the in-game layout editor's output.
 // EditMode (#edit) POSTs the full layout array to /api/layout; this writes it
-// straight to src/layout.json (the same file the game imports), so editing
-// repositions the real game live via HMR. `apply: 'serve'` keeps it out of
+// straight to src/layout.json (the same file the game imports) and triggers a
+// reload, so editing repositions the real game. `apply: 'serve'` keeps it out of
 // production builds entirely.
 function layoutPersist(): Plugin {
   return {
@@ -56,6 +66,40 @@ function layoutPersist(): Plugin {
             if (!Array.isArray(parsed)) throw new Error('expected array')
             const file = resolve(server.config.root, 'src/layout.json')
             writeFileSync(file, JSON.stringify(parsed, null, 2) + '\n')
+            fullReload(server)
+            res.statusCode = 200
+            res.end('ok')
+          } catch (e) {
+            res.statusCode = 400
+            res.end('bad json: ' + (e as Error).message)
+          }
+        })
+      })
+    },
+  }
+}
+
+// Dev-only middleware that persists the in-game coin-stack tuner's output to
+// src/coinstack.json (the same file the game imports) and triggers a reload, so
+// tuning the coin scale/perspective in #edit updates the real game.
+function coinStackPersist(): Plugin {
+  return {
+    name: 'coinstack-persist',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use('/api/coinstack', (req, res, next) => {
+        if (req.method !== 'POST') return next()
+        let body = ''
+        req.on('data', (c) => (body += c))
+        req.on('end', () => {
+          try {
+            const parsed = JSON.parse(body)
+            if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+              throw new Error('expected object')
+            }
+            const file = resolve(server.config.root, 'src/coinstack.json')
+            writeFileSync(file, JSON.stringify(parsed, null, 2) + '\n')
+            fullReload(server)
             res.statusCode = 200
             res.end('ok')
           } catch (e) {
@@ -70,7 +114,7 @@ function layoutPersist(): Plugin {
 
 export default defineConfig({
   ...shared,
-  plugins: [viteSingleFile(), cleanOutput(), layoutPersist()],
+  plugins: [viteSingleFile(), cleanOutput(), layoutPersist(), coinStackPersist()],
   define: {
     'import.meta.env.VITE_ITERATION': JSON.stringify(ITERATION),
   },

@@ -80,5 +80,8 @@ export const COIN_MAX = 6
 
 // Interaction timings (ms).
 export const IDLE_HINT_MS = 4000 // PDF: 4s inactivity -> hand + "tap to merge"
-export const PATIENCE_MS = 14_000 // per-customer patience duration
+export const PATIENCE_MS = 14_000 // base per-customer patience duration
+// Per-customer patience multipliers (customer 1, 2, 3): later customers need
+// longer to assemble higher-value columns, so they get more time.
+export const PATIENCE_MULT = [1, 1.5, 2] as const
 export const TUTORIAL_DIM_ALPHA = 0.75 // PDF: 0.75 opaque tutorial overlay

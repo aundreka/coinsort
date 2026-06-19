@@ -1,5 +1,5 @@
 import Phaser from 'phaser'
-import { PATIENCE_MS, IDLE_HINT_MS } from '../constants'
+import { PATIENCE_MS, PATIENCE_MULT, IDLE_HINT_MS } from '../constants'
 import { ITERATION } from '../iteration'
 import { bindLifecycle, notifyGameStart, notifyGameEnd } from '../networks'
 import { trackEvent } from '../analytics'
@@ -210,6 +210,7 @@ export class GameScene extends Phaser.Scene {
    *  DEAL pulses only when the player can't yet assemble a full column from the
    *  coins they already hold (so they need to deal more). */
   private updateButtonHints(): void {
+    this.board.updateMergeGlows() // subtle glow on any mergeable column
     if (this.ended || this.busy) {
       this.buttons.setMergeReady(false)
       this.buttons.setDealReady(false)
@@ -247,6 +248,12 @@ export class GameScene extends Phaser.Scene {
     this.audio.playGreet(this.queue.isFemale)
   }
 
+  /** Per-customer patience duration (customer 2 longer, customer 3 twice). */
+  private patienceMs(): number {
+    const i = Math.min(this.queue.currentIndex, PATIENCE_MULT.length - 1)
+    return PATIENCE_MS * PATIENCE_MULT[i]
+  }
+
   /** Show the request bubble for 3s, then swap it for the patience bar + timer. */
   private startCustomerPhase(): void {
     this.patience.hide()
@@ -254,7 +261,7 @@ export class GameScene extends Phaser.Scene {
     this.bubbleTimer = this.time.delayedCall(3000, () => {
       if (this.ended || this.busy) return
       this.queue.bubble.hide()
-      this.patience.start(PATIENCE_MS)
+      this.patience.start(this.patienceMs())
     })
   }
 
@@ -308,7 +315,7 @@ export class GameScene extends Phaser.Scene {
       return
     }
     this.time.delayedCall(600, () => this.queue.showAngry(false))
-    this.patience.start(PATIENCE_MS)
+    this.patience.start(this.patienceMs())
   }
 
   // ---- end ----------------------------------------------------------------
@@ -342,8 +349,17 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ---- relayout cascade ---------------------------------------------------
+  /** Called synchronously the instant a resize event fires (before the debounced
+   *  relayout), so a held stack is dropped + taps guarded as early as possible. */
+  onViewportResizing(): void {
+    if (this.ready) this.board.onViewportChange()
+  }
+
   relayout(): void {
     if (!this.ready) return
+    // A resize drops any held coin run + guards against the synthetic tap some
+    // ad SDKs fire on resize (which otherwise merged the lifted stack sideways).
+    this.board.onViewportChange()
     this.bg.relayout()
     this.logo.relayout()
     this.tray.relayout()

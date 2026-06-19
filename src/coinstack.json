@@ -1,0 +1,10 @@
+{
+  "coinScale": 1.06,
+  "stepFrac": 0.2,
+  "inwardFrac": 0.01,
+  "backRowMult": 1.05,
+  "liftFrac": 0.75,
+  "backFrac": 0.4,
+  "depthScale": 0.99,
+  "frontRowScale": 1.08
+}

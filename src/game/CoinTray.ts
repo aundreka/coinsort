@@ -3,6 +3,7 @@ import { Placeable } from './Placeable'
 import { TRAY, DEPTH } from '../constants'
 import { layoutOf, wasLoaded } from '../layout'
 import { isEditEnabled } from '../edit/registry'
+import { coinStack } from '../coinstack'
 
 // The coin tray sprite + the geometry of its 2x5 slot grid. Slot centers come
 // from the computed grid by default, but each slot can be individually placed
@@ -49,12 +50,31 @@ export class CoinTray {
     return this.gridCenter(i)
   }
 
-  /** Design-space coin width (slightly smaller than a cell). */
-  coinWidth(): number {
+  /** Design-space coin width (slightly smaller than a cell), times the live
+   *  coinScale tuning factor. When a slot index is given, also applies that
+   *  slot's own size multiplier — so back-row columns can be shrunk for
+   *  perspective by scaling their slot markers in #edit. */
+  coinWidth(col?: number): number {
     const e = this.placeable.entry
     const w = this.placeable.nativeW * e.scale
     const cellW = (w * (1 - 2 * TRAY.insetX)) / TRAY.cols
-    return cellW * TRAY.coinCellW
+    const base = cellW * TRAY.coinCellW * coinStack().coinScale
+    if (col === undefined) return base
+    // The near (last) row reads as closer, so its coins get a size bump.
+    const frontRow = Math.floor(col / TRAY.cols) === TRAY.rows - 1
+    const rowMul = frontRow ? coinStack().frontRowScale : 1
+    return base * this.slotScale(col) * rowMul
+  }
+
+  /** Per-slot coin-size multiplier. Mirrors slotCenter()'s rule: a slot override
+   *  only applies once it's live in #edit or actually saved to disk; otherwise 1.
+   *  Editing a slot marker's scale (wheel) in #edit feeds straight into this. */
+  slotScale(i: number): number {
+    const key = `slot${i}`
+    if ((isEditEnabled() && this.markers.length) || wasLoaded(key)) {
+      return layoutOf(key).scale
+    }
+    return 1
   }
 
   // ---- edit-mode slot markers --------------------------------------------
