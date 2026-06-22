@@ -159,5 +159,8 @@ export class Coin {
     this.image.setDepth(DEPTH.COIN)
     this.image.setAngle(0)
     this.image.setAlpha(1) // reset (collapse fades coins out before release)
+    this.image.clearTint() // drop any error-flash / merge-highlight tint
+    const fx = (this.image as unknown as { postFX?: { clear?: () => void } }).postFX
+    if (fx && typeof fx.clear === 'function') fx.clear() // drop any merge-highlight glow
   }
 }

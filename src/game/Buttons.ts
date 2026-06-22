@@ -1,6 +1,7 @@
 import Phaser from 'phaser'
 import { Placeable } from './Placeable'
 import { isEditEnabled } from '../edit/registry'
+import { sd } from '../utils/responsive'
 import type { SoundManager } from './SoundManager'
 
 interface ButtonCallbacks {
@@ -17,20 +18,33 @@ export class Buttons {
   readonly deal: Placeable
   readonly merge: Placeable
   private enabled = true
+  private dealEnabled = true
   private scene: Phaser.Scene
   private mergePulse?: Phaser.Tweens.Tween
   private dealPulse?: Phaser.Tweens.Tween
+  private block!: Phaser.GameObjects.Graphics // "no" icon shown on a blocked DEAL
 
   constructor(scene: Phaser.Scene, sound: SoundManager, cbs: ButtonCallbacks) {
     this.scene = scene
     this.deal = new Placeable(scene, 'dealBtn', 'dealBtn')
     this.merge = new Placeable(scene, 'mergeBtn', 'mergeBtn')
+    this.block = scene.add.graphics().setDepth(this.deal.image.depth + 5).setAlpha(0)
 
     if (!isEditEnabled()) {
-      this.wire(this.deal, () => {
-        sound.playClick()
-        cbs.onDeal()
-      })
+      // DEAL stays at full strength even when it can't be used; pressing it while
+      // there's no empty column flashes a "blocked" icon + buzz instead of dealing.
+      this.wire(
+        this.deal,
+        () => {
+          sound.playClick()
+          cbs.onDeal()
+        },
+        () => this.dealEnabled,
+        () => {
+          sound.playWrong()
+          this.showBlocked()
+        },
+      )
       this.wire(this.merge, () => {
         sound.playClick()
         cbs.onMerge()
@@ -38,12 +52,40 @@ export class Buttons {
     }
   }
 
-  private wire(p: Placeable, fn: () => void): void {
+  private wire(p: Placeable, fn: () => void, guard?: () => boolean, onBlocked?: () => void): void {
     p.image.setInteractive({ useHandCursor: true })
     p.image.on('pointerdown', () => {
       if (!this.enabled) return
+      if (guard && !guard()) {
+        onBlocked?.()
+        return
+      }
       this.press(p)
       fn()
+    })
+  }
+
+  /** Flash the universal "no" symbol (red circle + slash) over DEAL, popping in and
+   *  fading out — the cue that DEAL can't be used right now (no empty column). */
+  private showBlocked(): void {
+    const r = sd(42)
+    const d = r * Math.SQRT1_2
+    this.block.clear()
+    this.block.lineStyle(sd(9), 0xff2e2e, 1)
+    this.block.strokeCircle(0, 0, r)
+    this.block.beginPath()
+    this.block.moveTo(-d, -d)
+    this.block.lineTo(d, d)
+    this.block.strokePath()
+    this.block.setPosition(this.deal.image.x, this.deal.image.y).setAlpha(1).setScale(0.5)
+    this.scene.tweens.killTweensOf(this.block)
+    this.scene.tweens.add({ targets: this.block, scale: 1, duration: 170, ease: 'Back.easeOut' })
+    this.scene.tweens.add({
+      targets: this.block,
+      alpha: 0,
+      delay: 480,
+      duration: 240,
+      ease: 'Quad.easeIn',
     })
   }
 
@@ -65,6 +107,13 @@ export class Buttons {
 
   setEnabled(on: boolean): void {
     this.enabled = on
+  }
+
+  /** Track whether DEAL can be used (an empty column exists). The button keeps its
+   *  full look either way — pressing it while disabled flashes the block icon
+   *  (showBlocked) rather than dealing, via the wired guard. */
+  setDealEnabled(on: boolean): void {
+    this.dealEnabled = on
   }
 
   /** Continuously pulse MERGE while a column is ready to merge. */
@@ -109,5 +158,7 @@ export class Buttons {
   relayout(): void {
     this.deal.relayout()
     this.merge.relayout()
+    this.scene.tweens.killTweensOf(this.block)
+    this.block.setAlpha(0) // drop the transient block icon on resize
   }
 }

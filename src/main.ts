@@ -159,7 +159,10 @@ async function boot(): Promise<void> {
     transparent: true,
     parent,
     scale: { mode: Phaser.Scale.NONE, width: Math.round(w * DPR), height: Math.round(h * DPR) },
-    render: { antialias: true, pixelArt: false, roundPixels: true, powerPreference: 'high-performance' },
+    // roundPixels OFF: snapping vertices to integers each frame makes continuous
+    // scale tweens (button/CTA/coin pulses) shimmer ("shaky"); LINEAR filtering on
+    // the WebP art keeps things crisp without it.
+    render: { antialias: true, pixelArt: false, roundPixels: false, powerPreference: 'high-performance' },
     fps: { target: 60, min: 30 },
     scene: [BootScene, GameScene],
   })

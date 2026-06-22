@@ -1,10 +1,29 @@
 import Phaser from 'phaser'
 import { DEPTH } from '../constants'
-import { sd } from '../utils/responsive'
+import { sd, viewW, viewH } from '../utils/responsive'
 
 // Visual juice. Pure presentation — no SDK, no game state.
 export class Vfx {
   constructor(private scene: Phaser.Scene) {}
+
+  /** Full-screen red flash — reserved for the patience-meter failure (paired with
+   *  the screen shake). Oversized + screen-pinned so it always covers the canvas. */
+  redFlash(): void {
+    const big = Math.max(viewW(), viewH()) * 3
+    const r = this.scene.add
+      .rectangle(viewW() / 2, viewH() / 2, big, big, 0xff2a2a, 0)
+      .setScrollFactor(0)
+      .setDepth(DEPTH.DIM - 1)
+    this.scene.tweens.add({
+      targets: r,
+      alpha: 0.42,
+      duration: 110,
+      yoyo: true,
+      hold: 60,
+      ease: 'Quad.easeOut',
+      onComplete: () => r.destroy(),
+    })
+  }
 
   /** Expanding glow burst at a screen position (merge / deliver accent). */
   glowBurst(screenX: number, screenY: number, designW = 180, tint?: number): void {

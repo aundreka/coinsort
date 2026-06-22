@@ -105,12 +105,17 @@ export class GameScene extends Phaser.Scene {
         )
       })
     } else {
+      // The game logo doubles as a CTA: a tap redirects straight to the store.
+      this.logo.image.setInteractive({ useHandCursor: true })
+      this.logo.image.on('pointerdown', () => this.endCard.redirectToStore())
       this.queue.begin()
-      // Start with a spread of sub-request coins to sort and merge upward.
-      this.board.seedSpread(this.queue.requestValue)
+      // Start with a spread of coins to sort and merge upward.
+      this.board.seedSpread()
       this.greet()
       this.startCustomerPhase()
-      this.lastInteract = this.time.now
+      // Show the tutorial hand immediately (intro tutorial, no idle wait): pretend
+      // the player has been idle for the full hint window already.
+      this.lastInteract = this.time.now - IDLE_HINT_MS - 1
       this.updateButtonHints()
     }
 
@@ -126,6 +131,9 @@ export class GameScene extends Phaser.Scene {
       this.greet() // the customer "talks" (Hello) on the first tap
       notifyGameStart()
       trackEvent('CHALLENGE_STARTED')
+      // Timers only begin on the first player input: kick off the current
+      // customer's patience countdown now (not on a passive page load).
+      if (!this.ended && !this.busy) this.armPatience()
     }
     this.markInteract()
   }
@@ -136,7 +144,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(): void {
-    if (!this.ready || EDIT_MODE || this.ended || !this.started || this.busy) return
+    // NB: the tutorial hint runs even before `started`, so it acts as an intro
+    // demo from frame one. The patience countdown is what waits for first input.
+    if (!this.ready || EDIT_MODE || this.ended || this.busy) return
     // Empty tray -> the only move is DEAL, so guide there IMMEDIATELY (no idle
     // wait). Otherwise wait for inactivity, then demonstrate the best action.
     if (this.board.isEmpty()) {
@@ -162,15 +172,18 @@ export class GameScene extends Phaser.Scene {
     if (this.ended || this.busy || this.board.isBusy()) return
     this.markInteract()
     this.registerClick() // pressing MERGE counts toward the "2 clicks" iteration
-    // Collapse any full single-value column (gives the change). If the matching
-    // value is collapsed, the customer is served.
-    const did = this.board.collapseFull(this.queue.requestValue, () => this.serveCustomer())
+    // Collapse any full single-value column (gives the change). If the merged
+    // value is what the customer asked for, serve them; if it's the WRONG value,
+    // that's a mistake -> they turn angry immediately and a life is lost.
+    const did = this.board.collapseFull(this.queue.requestValue, (matched) => {
+      if (matched) this.serveCustomer()
+      else this.onWrongMerge()
+    })
     if (!did) {
       // No full column yet -> immediately show the hand guiding the player to
       // MERGE coins: demonstrate sliding matching coins together to build a full
       // column. (If there's nothing to combine yet, fall back to DEAL.)
-      this.audio.playWrong()
-      this.vfx.shake(0.004, 160)
+      this.board.signalInvalid() // simple error: red highlight + buzz (no shake)
       const slide = this.board.mergeHint()
       if (slide) this.hand.slide(slide.from, slide.to)
       else this.hand.pointAt('dealBtn')
@@ -185,39 +198,29 @@ export class GameScene extends Phaser.Scene {
     if (this.ended || this.busy || this.board.isBusy()) return
     this.markInteract()
     this.registerClick() // pressing DEAL counts toward the "2 clicks" iteration
-    // DEAL only fails when the tray is full. If a column is still mergeable, that
-    // is an error -> buzz + guide the player to MERGE ("tap to merge"). If there
-    // is nothing left to merge, the tray is a dead end -> end scene.
-    if (this.board.isFull()) {
-      if (this.board.hasFullUniform()) {
-        this.audio.playWrong()
-        this.vfx.shake(0.004, 160)
-        this.hand.pointAt('mergeBtn') // hand over MERGE + "tap to merge" label
-        this.lastInteract = this.time.now
-        this.time.delayedCall(2600, () => {
-          if (!this.ended) this.hand.hide()
-        })
-      } else {
-        this.endGame()
-      }
-      return
-    }
-    const n = this.board.dealCoins(this.queue.requestValue)
-    if (n > 0) this.audio.playCoin()
+    // DEAL is only clickable when a column is empty (the button is dimmed + inert
+    // otherwise, see updateButtonHints), so this just fills those empties with a
+    // fresh batch. dealCoins runs the staggered drop-in cascade + per-coin sound.
+    this.board.dealCoins()
   }
 
-  /** Same pulse on both buttons: MERGE pulses whenever a column is mergeable;
-   *  DEAL pulses only when the player can't yet assemble a full column from the
-   *  coins they already hold (so they need to deal more). */
+  /** MERGE pulses whenever a column is ready to merge. DEAL is only enabled (and
+   *  pulses) when there is an empty column to deal into — pressing a full tray's
+   *  DEAL does nothing, so it's dimmed out. */
   private updateButtonHints(): void {
-    this.board.updateMergeGlows() // subtle glow on any mergeable column
+    this.board.updateMergeGlows() // bright glow on any mergeable column
     if (this.ended || this.busy) {
       this.buttons.setMergeReady(false)
       this.buttons.setDealReady(false)
+      this.buttons.setDealEnabled(false)
       return
     }
-    this.buttons.setMergeReady(this.board.hasFullUniform())
-    this.buttons.setDealReady(!this.board.canFormFullColumn())
+    const mergeReady = this.board.hasFullUniform()
+    const canDeal = this.board.hasEmptyColumn()
+    this.buttons.setMergeReady(mergeReady)
+    this.buttons.setDealEnabled(canDeal)
+    // Guide to DEAL only when there's somewhere to deal AND nothing to merge yet.
+    this.buttons.setDealReady(canDeal && !mergeReady)
   }
 
   /** A "click" = any player interaction: tapping a coin column (pick up / move)
@@ -254,9 +257,18 @@ export class GameScene extends Phaser.Scene {
     return PATIENCE_MS * PATIENCE_MULT[i]
   }
 
-  /** Show the request bubble for 3s, then swap it for the patience bar + timer. */
+  /** Show the request bubble. The patience countdown only ARMS once the player
+   *  has interacted at least once — for the first customer that means waiting for
+   *  the first input (armed from onAnyPointer); later customers arm immediately
+   *  since the game is already started. */
   private startCustomerPhase(): void {
     this.patience.hide()
+    this.bubbleTimer?.remove()
+    if (this.started) this.armPatience()
+  }
+
+  /** Show the request bubble for 3s, then swap it for the patience bar + timer. */
+  private armPatience(): void {
     this.bubbleTimer?.remove()
     this.bubbleTimer = this.time.delayedCall(3000, () => {
       if (this.ended || this.busy) return
@@ -308,14 +320,30 @@ export class GameScene extends Phaser.Scene {
     this.hearts.lose()
     this.audio.playLifeLost() // Pop with Bubbles on heart loss
     this.audio.playGrunt(this.queue.isFemale)
+    // Patience ran out: this is the BIG error — screen shake + a full-screen red
+    // flash (simple gameplay errors only get a local red highlight, never this).
     this.vfx.shake()
+    this.vfx.redFlash()
+    // Once a customer turns angry they STAY angry for the rest of their stay.
     this.queue.showAngry(true)
-    if (this.hearts.isDead()) {
-      this.endGame()
-      return
-    }
-    this.time.delayedCall(600, () => this.queue.showAngry(false))
-    this.patience.start(this.patienceMs())
+    // The timer does NOT come back for this customer — they just wait (angry) until
+    // served. The patience bar only returns for the NEXT customer (startCustomerPhase).
+    this.patience.hide()
+    if (this.hearts.isDead()) this.endGame()
+  }
+
+  /** The player merged the WRONG value (not what the customer asked for): same
+   *  failure tier as the patience meter emptying — the customer turns angry, the
+   *  screen shakes + red-flashes, and a life is lost, immediately. */
+  private onWrongMerge(): void {
+    if (this.ended) return
+    this.hearts.lose()
+    this.audio.playLifeLost()
+    this.audio.playGrunt(this.queue.isFemale)
+    this.vfx.shake()
+    this.vfx.redFlash()
+    this.queue.showAngry(true) // and they stay angry for the rest of their stay
+    if (this.hearts.isDead()) this.endGame()
   }
 
   // ---- end ----------------------------------------------------------------

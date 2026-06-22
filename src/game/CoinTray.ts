@@ -13,9 +13,17 @@ export class CoinTray {
   readonly placeable: Placeable
   private markers: Placeable[] = []
 
-  constructor(scene: Phaser.Scene) {
+  constructor(private scene: Phaser.Scene) {
     this.placeable = new Placeable(scene, 'tray', 'tray')
     if (isEditEnabled()) this.makeMarkers(scene)
+  }
+
+  /** Briefly tint the tray frame red — generic "invalid action" feedback for a
+   *  move/press the rules don't allow (no screen shake; that's patience-only). */
+  flashInvalid(): void {
+    const img = this.placeable.image
+    img.setTint(0xff6a6a)
+    this.scene.time.delayedCall(240, () => img.clearTint())
   }
 
   get slotCount(): number {

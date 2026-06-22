@@ -4,11 +4,10 @@
 export const DESIGN_W = 1080
 export const DESIGN_H = 1920
 
-// Store pages. NOTE: the assessment PDF's store links were not resolvable here —
-// replace with the real Coin Sort store URLs before launch.
+// Store pages — Coin Sort (MoodGames).
 export const STORE_URL = {
-  ios: 'https://apps.apple.com/app/id0000000000',
-  android: 'https://play.google.com/store/apps/details?id=com.coinsort.changechange',
+  ios: 'https://apps.apple.com/us/app/coin-sort/id6446354191',
+  android: 'https://play.google.com/store/apps/details?id=com.MoodGames.CoinSort&hl=en',
 }
 
 // Depth map.
@@ -80,7 +79,7 @@ export const COIN_MAX = 6
 
 // Interaction timings (ms).
 export const IDLE_HINT_MS = 4000 // PDF: 4s inactivity -> hand + "tap to merge"
-export const PATIENCE_MS = 14_000 // base per-customer patience duration
+export const PATIENCE_MS = 8_000 // base per-customer patience duration
 // Per-customer patience multipliers (customer 1, 2, 3): later customers need
 // longer to assemble higher-value columns, so they get more time.
 export const PATIENCE_MULT = [1, 1.5, 2] as const
